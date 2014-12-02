@@ -1,0 +1,12 @@
+import File;
+
+module DFSApp
+{
+  interface FileServer
+  {
+    File openFile(in string filename);
+    String[] getFiles();
+    boolean modifyFile(in string filename);
+    boolean hasFile(in string filename);
+  };
+};
