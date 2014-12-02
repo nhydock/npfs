@@ -76,7 +76,7 @@ public class FileServer extends NPFSApp.FileServerPOA {
     }
     
     @Override
-    public void openFile(String filename) {
+    public boolean openFile(String filename) {
         //look through my files first
         if (!hasFile(filename)) {
             copyFile(filename);
@@ -84,10 +84,11 @@ public class FileServer extends NPFSApp.FileServerPOA {
         openedFile = new File(filename);
         try {
             openedFileStream = new FileInputStream(openedFile);
+            return true;
         } catch (FileNotFoundException e) {
             e.printStackTrace();
             openedFile = null;
-            
+            return false;
         }
     }
     

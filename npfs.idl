@@ -3,7 +3,7 @@ module NPFSApp
   typedef sequence<string> files;
   interface FileServer
   {
-    oneway void openFile(in string filename);
+    boolean openFile(in string filename);
     oneway void closeFile();
     files getFiles();
     oneway void modifyFile();
