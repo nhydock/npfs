@@ -1,12 +1,12 @@
-import File;
-
-module DFSApp
+module NPFSApp
 {
+  typedef sequence<string> files;
   interface FileServer
   {
-    File openFile(in string filename);
-    String[] getFiles();
-    boolean modifyFile(in string filename);
+    oneway void openFile(in string filename);
+    oneway void closeFile();
+    files getFiles();
+    oneway void modifyFile();
     boolean hasFile(in string filename);
   };
 };
