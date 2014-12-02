@@ -43,7 +43,7 @@ public class FileServer extends NPFSApp.FileServerPOA {
         }
         @Override
         public boolean accept(File pathname) {
-            return pathname.exists() && !pathname.isHidden();
+            return !pathname.isHidden() && pathname.getName().equals(name);
         }
         
     }
