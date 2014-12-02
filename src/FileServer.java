@@ -1,53 +1,94 @@
 import java.io.DataInputStream;
 import java.io.File;
+import java.io.FileFilter;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintStream;
 import java.net.Socket;
 import java.net.URL;
+import java.net.URLConnection;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 
-
 public class FileServer extends NPFSApp.FileServerPOA {
 
+    /**
+     * Prevents hidden files from appearing in our list
+     * @author nhydock
+     *
+     */
+    private static class HideHidden implements FileFilter {
+
+        private static final FileFilter instance = new HideHidden();
+        
+        @Override
+        public boolean accept(File pathname) {
+            //ignore hidden files
+            return !pathname.isHidden();
+        }
+        
+    }
+    
+    private static class OpenFilter implements FileFilter {
+        
+        String name;
+        public OpenFilter(String name) {
+            this.name = name;
+        }
+        @Override
+        public boolean accept(File pathname) {
+            return pathname.exists() && !pathname.isHidden();
+        }
+        
+    }
+    
     //list of all servers in the same network
     // servers are sorted by closeness
     ArrayList<FileServer> servers;
     String ip;
     
+    File myDirectory;
+    File openedFile;
+    InputStream openedFileStream;
+    
+    Versioning versionDB;
+    
     public FileServer(String ip) {
         this.ip = ip;
+        myDirectory = new File(".");
+        versionDB = new Versioning(new File(".versions"));
+    }
+    
+    private String[] getMyFiles() {
+        File[] files = myDirectory.listFiles(HideHidden.instance);
+        String[] names = new String[files.length];
+        for (int i = 0; i < files.length; i++) {
+            File f = files[i];
+            names[i] = f.getName();
+        }
+        return names;
     }
     
     @Override
     public void openFile(String filename) {
-        // Look for file through server list
-        for (FileServer server : servers) {
-            if (server.hasFile(filename)) {
-                //copy file to local
-                // TODO only grab latest version that is closest
-                try {
-                    URL connection = new URL(server.ip);
-                    File file = new File(filename);
-                    file.createNewFile();
-                    try (ReadableByteChannel rbc = Channels.newChannel(connection.openStream());
-                         FileOutputStream fos = new FileOutputStream(file) ) {
-                        fos.getChannel().transferFrom(rbc, 0, Long.MAX_VALUE);
-                    } catch (IOException e) {
-                       e.printStackTrace();
-                   }
-                    return file;
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
+        //look through my files first
+        if (!hasFile(filename)) {
+            copyFile(filename);
         }
-        
-        return null;
+        openedFile = new File(filename);
+        try {
+            openedFileStream = new FileInputStream(openedFile);
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+            openedFile = null;
+            
+        }
     }
     
     /**
@@ -57,16 +98,44 @@ public class FileServer extends NPFSApp.FileServerPOA {
      */
     public boolean hasFile(String filename) {
         // TODO check against a version sql database
-        
-        File file = new File(filename);
-        return file.exists();
+        return myDirectory.listFiles(new OpenFilter(filename)).length > 0;
     }
 
+    /**
+     * Modifies the open file
+     */
     @Override
-    public boolean modifyFile(String filename) {
-        // TODO Increment this file's version number
+    public void modifyFile() {
         // TODO prevent writing if another server has a newer version number
-        return false;
+        
+        // TODO Increment this file's version number
+        
+    }
+    
+    /**
+     * Copies a file from a remote server to this local instance
+     * @param filename
+     */
+    private void copyFile(String filename) {
+        File file = new File(filename);
+        try {
+            file.createNewFile();
+            for (FileServer other : this.servers) {
+                if (other.hasFile(filename)) {
+                    URL url = new URL(other.ip + "/" + filename);
+                    URLConnection conn = url.openConnection();
+                    try (FileOutputStream output = new FileOutputStream(file);
+                         InputStream input = conn.getInputStream()) {
+                        byte[] buffer = new byte[64];
+                        while (input.read(buffer) != -1) {
+                            output.write(buffer);
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
     
     /**
@@ -119,5 +188,22 @@ public class FileServer extends NPFSApp.FileServerPOA {
             return ((Long)o1.ping()).compareTo((Long)o2.ping());
         }
         
+    }
+
+    @Override
+    public void closeFile() {
+        openedFile = null;
+        if (openedFileStream != null) {
+            try {
+                openedFileStream.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    @Override
+    public String[] getFiles() {
+        return null;
     }
 }
