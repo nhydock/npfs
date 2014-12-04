@@ -6,6 +6,7 @@ import org.omg.PortableServer.POA;
 import org.omg.PortableServer.POAHelper;
 
 import NPFSApp.implementation.LocalFileServer;
+import NPFSApp.implementation.RemoteFileServer;
 
 public class Runner {
     
@@ -39,6 +40,15 @@ public class Runner {
 
             System.out.println("NPFileServer ready and waiting ...");
 
+            for (String arg : args) {
+                if (arg.startsWith("ip=")) {
+                    String[] ips = arg.substring(3).split(",");
+                    for (String ip : ips) {
+                        server.addServer((new RemoteFileServer(ip))._this(orb));
+                    }
+                }
+            }
+            
             // wait for invocations from clients
             orb.run();
         }

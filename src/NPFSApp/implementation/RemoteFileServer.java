@@ -6,6 +6,7 @@ import org.omg.CosNaming.NamingContextExtHelper;
 import org.omg.CosNaming.NamingContextPackage.CannotProceed;
 import org.omg.CosNaming.NamingContextPackage.NotFound;
 
+import NPFSApp.FileServer;
 import NPFSApp.FileServerHelper;
 import NPFSApp.FileServerPOA;
 
@@ -19,8 +20,14 @@ public class RemoteFileServer extends FileServerPOA {
         this.ip = ip;
         
         try{
+            String[] args = {
+                    "-ORBInitialPort",
+                    "1050",
+                    "-ORBInitialHost",
+                    ip
+            };
             // create and initialize the ORB
-            ORB orb = ORB.init(new String[0], null);
+            ORB orb = ORB.init(args, null);
     
             // get the root naming context
             org.omg.CORBA.Object objRef = orb.resolve_initial_references("FileServer");
@@ -71,6 +78,16 @@ public class RemoteFileServer extends FileServerPOA {
     @Override
     public boolean testResponse() {
         return true;
+    }
+
+    @Override
+    public String[] getConnectedServers() {
+        return remote.getConnectedServers();
+    }
+
+    @Override
+    public void addServer(FileServer server) {
+        remote.addServer(server);
     }
 
 }

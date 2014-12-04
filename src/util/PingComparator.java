@@ -2,15 +2,15 @@ package util;
 
 import java.util.Comparator;
 
-import NPFSApp.implementation.RemoteFileServer;
+import NPFSApp.FileServer;
 
-public class PingComparator implements Comparator<RemoteFileServer>
+public class PingComparator implements Comparator<FileServer>
 {
     /**
      * Pings this file server instance from the current host
      * @return
      */
-    public long ping(RemoteFileServer server) {
+    public long ping(FileServer server) {
         long elapsed;
         long start = System.currentTimeMillis();
         server.testResponse();
@@ -20,7 +20,7 @@ public class PingComparator implements Comparator<RemoteFileServer>
     }
     
     @Override
-    public int compare(RemoteFileServer o1, RemoteFileServer o2) {
+    public int compare(FileServer o1, FileServer o2) {
         Long time1 = new Long(ping(o1));
         Long time2 = new Long(ping(o2));
         

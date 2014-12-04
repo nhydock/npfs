@@ -1,6 +1,8 @@
 module NPFSApp
 {
   typedef sequence<string> files;
+  typedef sequence<string> servers;
+  
   interface FileServer
   {
     boolean openFile(in string filename);
@@ -10,5 +12,7 @@ module NPFSApp
     boolean hasFile(in string filename);
     string getIpAddress();
     boolean testResponse();
+    servers getConnectedServers();
+    oneway void addServer(in FileServer server);
   };
 };

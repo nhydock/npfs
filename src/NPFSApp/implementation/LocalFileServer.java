@@ -10,6 +10,7 @@ import java.net.URL;
 import java.net.URLConnection;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Set;
 
 import org.omg.CORBA.ORB;
 
@@ -17,14 +18,15 @@ import util.HideHidden;
 import util.OpenFilter;
 import util.PingComparator;
 import util.Versioning;
+import NPFSApp.FileServer;
 import NPFSApp.FileServerPOA;
-
 
 public class LocalFileServer extends FileServerPOA {
 
     //list of all servers in the same network
     // servers are sorted by closeness
-    ArrayList<RemoteFileServer> servers;
+    ArrayList<FileServer> servers;
+    Set<String> connectedAddresses;
     
     File myDirectory;
     File openedFile;
@@ -95,9 +97,19 @@ public class LocalFileServer extends FileServerPOA {
      * Adds this ip to the list of other seen nodes
      * @param ip
      */
-    public void addServer(RemoteFileServer server) {
+    @Override
+    public void addServer(FileServer server) {
         servers.add(server);
+        connectedAddresses.add(server.getIpAddress());
+        System.out.println("Connected to remote server: " + server.getIpAddress());
+        for (String ip : server.getConnectedServers()) {
+            if (!connectedAddresses.contains(ip)) {
+                RemoteFileServer r = new RemoteFileServer(ip);
+                addServer((r)._this(orb));
+            }
+        }
         Collections.sort(servers, new PingComparator());
+        server.addServer(_this());
     }
     
     @Override
@@ -125,7 +137,7 @@ public class LocalFileServer extends FileServerPOA {
         File file = new File(filename);
         try {
             file.createNewFile();
-            for (FileServerPOA other : this.servers) {
+            for (FileServer other : this.servers) {
                 if (other.hasFile(filename)) {
                     URL url = new URL(other.getIpAddress() + "/" + filename);
                     URLConnection conn = url.openConnection();
@@ -152,5 +164,14 @@ public class LocalFileServer extends FileServerPOA {
         
         // TODO Increment this file's version number
         
+    }
+
+    @Override
+    public String[] getConnectedServers() {
+        String[] connected = new String[servers.size()];
+        for (int i = 0; i < connected.length; i++) {
+            connected[i] = servers.get(i).getIpAddress();
+        }
+        return connected;
     }
 }
