@@ -8,5 +8,7 @@ module NPFSApp
     files getFiles();
     oneway void modifyFile();
     boolean hasFile(in string filename);
+    string getIpAddress();
+    boolean testResponse();
   };
 };
