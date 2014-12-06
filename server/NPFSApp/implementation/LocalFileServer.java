@@ -6,19 +6,32 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.URL;
 import java.net.URLConnection;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Properties;
 import java.util.Set;
 
 import org.omg.CORBA.ORB;
+import org.omg.CosNaming.NamingContextExt;
+import org.omg.CosNaming.NamingContextExtHelper;
+import org.omg.PortableServer.POA;
+import org.omg.PortableServer.POAHelper;
 
 import util.HideHidden;
 import util.OpenFilter;
 import util.PingComparator;
+import util.TerminalColors;
 import util.Versioning;
 import NPFSApp.FileServer;
+import NPFSApp.FileServerHelper;
 import NPFSApp.FileServerPOA;
 
 public class LocalFileServer extends FileServerPOA {
@@ -34,18 +47,22 @@ public class LocalFileServer extends FileServerPOA {
     
     Versioning versionDB;
     
-    private ORB orb;
+    String ip;
     
     public LocalFileServer() {
         myDirectory = new File(".");
         versionDB = new Versioning(new File(".versions"));
+        servers = new ArrayList<FileServer>();
+        connectedAddresses = new HashSet<String>();
+        try {
+            ip = InetAddress.getLocalHost().getHostName();
+        } catch (UnknownHostException e) {
+            ip = "localhost";
+        }
     }
     
-    public void setORB(ORB orb_val) {
-        orb = orb_val;
-    }
-    
-    private String[] getMyFiles() {
+    @Override
+    public String[] myFiles() {
         File[] files = myDirectory.listFiles(HideHidden.instance);
         String[] names = new String[files.length];
         for (int i = 0; i < files.length; i++) {
@@ -82,10 +99,9 @@ public class LocalFileServer extends FileServerPOA {
         return myDirectory.listFiles(new OpenFilter(filename)).length > 0;
     }
     
-
     @Override
     public String getIpAddress() {
-        return "127.0.0.1";
+        return ip;
     }
 
     @Override
@@ -102,14 +118,26 @@ public class LocalFileServer extends FileServerPOA {
         servers.add(server);
         connectedAddresses.add(server.getIpAddress());
         System.out.println("Connected to remote server: " + server.getIpAddress());
-        for (String ip : server.getConnectedServers()) {
-            if (!connectedAddresses.contains(ip)) {
-                RemoteFileServer r = new RemoteFileServer(ip);
-                addServer((r)._this(orb));
+        System.out.println("Remote server is also connected to " + server.getConnectedServers());
+        boolean addMe = true;
+        for (String addr : server.getConnectedServers()) {
+            if (addr.equals(this.getIpAddress())) {
+                addMe = false;
+            }
+            if (!connectedAddresses.contains(addr)) {
+                String host = addr.split(":")[0];
+                String port = addr.split(":")[1];
+                try {
+                    addServer(getRemoteServer(host, port));
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             }
         }
-        Collections.sort(servers, new PingComparator());
-        server.addServer(_this());
+        //Collections.sort(servers, new PingComparator());
+        if (addMe) {
+            server.addServer(_this());
+        }
     }
     
     @Override
@@ -126,7 +154,28 @@ public class LocalFileServer extends FileServerPOA {
 
     @Override
     public String[] getFiles() {
-        return null;
+        //file, ip
+        HashMap<String, String> allFiles = new HashMap<String, String>();
+        for (FileServer s : servers) {
+            for (String file : s.myFiles()) {
+                allFiles.put(file, s.getIpAddress());
+            }
+        }
+        for (String file : myFiles()) {
+            allFiles.put(file, getIpAddress());
+        }
+        String[] fileList = new String[allFiles.size()];
+        Iterator<String> files = allFiles.keySet().iterator();
+        for (int i = 0; files.hasNext(); i++) {
+            String file = files.next();
+            String host = allFiles.get(file);
+            fileList[i] = host + " " + file;
+        }
+        for (String file : fileList) {
+            System.out.println(file);
+        }
+        
+        return fileList;
     }
     
     /**
@@ -168,10 +217,30 @@ public class LocalFileServer extends FileServerPOA {
 
     @Override
     public String[] getConnectedServers() {
-        String[] connected = new String[servers.size()];
-        for (int i = 0; i < connected.length; i++) {
-            connected[i] = servers.get(i).getIpAddress();
-        }
-        return connected;
+        String[] addr = new String[connectedAddresses.size()];
+        return connectedAddresses.toArray(addr);
+    }
+    
+    public static FileServer getRemoteServer(String host, String port) throws Exception {
+        Properties prop = new Properties();
+        prop.put("org.omg.CORBA.ORBInitialHost", host);
+        prop.put("org.omg.CORBA.ORBInitialPort", ""+(Integer.valueOf(port) + 1));
+        String[] args = {};
+        // create and initialize the ORB
+        ORB orb = ORB.init(args, prop);
+
+        // get reference to rootpoa & activate the POAManager
+        POA rootpoa = POAHelper.narrow(orb.resolve_initial_references("RootPOA"));
+        rootpoa.the_POAManager().activate();
+
+        // get the root naming context
+        org.omg.CORBA.Object objRef = orb.resolve_initial_references("NameService");
+        // Use NamingContextExt which is part of the Interoperable
+        // Naming Service (INS) specification.
+        NamingContextExt ncRef = NamingContextExtHelper.narrow(objRef);
+
+        // resolve the Object Reference in Naming
+        String name = "NPFS";
+        return FileServerHelper.narrow(ncRef.resolve_str(name));
     }
 }
