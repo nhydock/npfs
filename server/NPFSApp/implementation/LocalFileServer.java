@@ -49,15 +49,15 @@ public class LocalFileServer extends FileServerPOA {
     
     String ip;
     
-    public LocalFileServer() {
+    public LocalFileServer(int port) {
         myDirectory = new File(".");
         versionDB = new Versioning(new File(".versions"));
         servers = new ArrayList<FileServer>();
         connectedAddresses = new HashSet<String>();
         try {
-            ip = InetAddress.getLocalHost().getHostName();
+            ip = InetAddress.getLocalHost().getHostName() + ":" + port;
         } catch (UnknownHostException e) {
-            ip = "localhost";
+            ip = "localhost:1050";
         }
     }
     

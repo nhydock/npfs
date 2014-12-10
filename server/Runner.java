@@ -19,7 +19,13 @@ public class Runner {
             rootpoa.the_POAManager().activate();
 
             // create servant and register it with the ORB
-            final LocalFileServer server = new LocalFileServer();
+            int port = 1050;
+            for (int i = 0; i < args.length; i++) {
+                if (args[i].equals("-port")) {
+                    port = Integer.parseInt(args[i+1]);
+                }
+            }
+            final LocalFileServer server = new LocalFileServer(port);
 
             // get object reference from the servant
             org.omg.CORBA.Object ref = rootpoa.servant_to_reference(server);
