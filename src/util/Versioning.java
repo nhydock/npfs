@@ -55,12 +55,13 @@ public class Versioning {
      * @param version - current version number
      * @return
      */
-    public boolean updateFile(String filename, int version) {
-        if (getVersion(filename) == version) {
-            versions.put(filename, version + 1);
-            return true;
-        }
-        return false;
+    public void updateFile(String filename, int version) {
+    	if (version == -1) {
+    		versions.remove(filename);
+    	} else {
+    		versions.put(filename, version);
+    	}
+    	update();
     }
     
     /**

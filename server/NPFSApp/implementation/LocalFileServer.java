@@ -2,17 +2,19 @@ package NPFSApp.implementation;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.URL;
 import java.net.URLConnection;
 import java.net.UnknownHostException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -27,8 +29,6 @@ import org.omg.PortableServer.POAHelper;
 
 import util.HideHidden;
 import util.OpenFilter;
-import util.PingComparator;
-import util.TerminalColors;
 import util.Versioning;
 import NPFSApp.FileServer;
 import NPFSApp.FileServerHelper;
@@ -36,18 +36,139 @@ import NPFSApp.FileServerPOA;
 
 public class LocalFileServer extends FileServerPOA {
 
+    /**
+     * Creates a link to a remote server, necessary for copying files to local instances
+     * @param host
+     * @param port
+     * @return
+     * @throws Exception
+     */
+    public static FileServer getRemoteServer(String host, String port) throws Exception {
+        Properties prop = new Properties();
+        prop.put("org.omg.CORBA.ORBInitialHost", host);
+        prop.put("org.omg.CORBA.ORBInitialPort", ""+(Integer.valueOf(port) + 1));
+        String[] args = {};
+        // create and initialize the ORB
+        ORB orb = ORB.init(args, prop);
+
+        // get reference to rootpoa & activate the POAManager
+        POA rootpoa = POAHelper.narrow(orb.resolve_initial_references("RootPOA"));
+        rootpoa.the_POAManager().activate();
+
+        // get the root naming context
+        org.omg.CORBA.Object objRef = orb.resolve_initial_references("NameService");
+        // Use NamingContextExt which is part of the Interoperable
+        // Naming Service (INS) specification.
+        NamingContextExt ncRef = NamingContextExtHelper.narrow(objRef);
+
+        // resolve the Object Reference in Naming
+        String name = "NPFS";
+        return FileServerHelper.narrow(ncRef.resolve_str(name));
+    }
+	
+	/**
+	 * Struct used for keeping track of an open file on a session
+	 * @author nhydock
+	 *
+	 */
+	private class OpenFile {
+		/**
+		 * Path of the file on the file system
+		 */
+		final String filename;
+		/**
+		 * Start of the data range
+		 */
+		final long start;
+		
+		/**
+		 * Version number received once opened
+		 */
+		final int version;
+		
+		/**
+		 * Length of the data that can be written
+		 */
+		public long len;
+		
+		OpenFile(String filename, long start, long end, int version) 
+		{
+			this.filename = filename;
+			this.start = start;
+			this.version = version;
+			this.len = end - start;
+		}
+		
+		/**
+		 * Overwrites and extends data if more has been written than read out
+		 * @param data
+		 */
+		public void write(byte[] data) {
+			Path old = (new File(filename)).toPath();
+			Path out = (new File("~"+filename)).toPath();
+			
+			try (InputStream oldStream = Files.newInputStream(old, StandardOpenOption.READ);
+				 OutputStream outStream = Files.newOutputStream(out, StandardOpenOption.CREATE)) {
+				
+				//read the first chunk from the old file and write it to temp
+				final int bufferSize = 64;
+				byte[] head = new byte[bufferSize];
+				long pointer = 0;
+				for (pointer = 0; pointer < start; pointer += bufferSize) {
+					if (oldStream.read(head) != -1) {
+						outStream.write(head);
+					}
+				}
+				if (pointer > start) {
+					head = new byte[(int)(pointer - start)];
+					oldStream.read(head);
+					outStream.write(head);
+				}
+				
+				//insert new data into the file
+				outStream.write(data);
+				
+				//skip over read out chunk
+				oldStream.skip(len);
+				
+				//write the tail of the file out
+				head = new byte[bufferSize];
+				while (oldStream.read(head) != -1) {
+					outStream.write(head);
+				}
+				
+			} catch (IOException e) {
+				e.printStackTrace();
+			} finally {
+				try {
+					Files.copy(out, old, StandardCopyOption.REPLACE_EXISTING);
+					Files.delete(out);
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+			
+			
+		}
+	}
+
+	private static int SessionCounter = 0;
+	
     //list of all servers in the same network
     // servers are sorted by closeness
     ArrayList<FileServer> servers;
     Set<String> connectedAddresses;
     
     File myDirectory;
-    File openedFile;
-    InputStream openedFileStream;
-    
     Versioning versionDB;
     
     String ip;
+    
+    /**
+     * Mapping of files open per connection.
+     * Only one file per connection is allowed open at a time
+     */
+    HashMap<Integer, OpenFile> openFiles;
     
     public LocalFileServer(int port) {
         myDirectory = new File(".");
@@ -59,8 +180,13 @@ public class LocalFileServer extends FileServerPOA {
         } catch (UnknownHostException e) {
             ip = "localhost:1050";
         }
+        
+        openFiles = new HashMap<Integer, OpenFile>();
     }
     
+    /**
+     * Gets the list of all files in the root directory of this server
+     */
     @Override
     public String[] myFiles() {
         File[] files = myDirectory.listFiles(HideHidden.instance);
@@ -72,30 +198,12 @@ public class LocalFileServer extends FileServerPOA {
         return names;
     }
     
-    @Override
-    public boolean openFile(String filename) {
-        //look through my files first
-        if (!hasFile(filename)) {
-            copyFile(filename);
-        }
-        openedFile = new File(filename);
-        try {
-            openedFileStream = new FileInputStream(openedFile);
-            return true;
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-            openedFile = null;
-            return false;
-        }
-    }
-    
     /**
      * Checks to see if this file server has the file
      * @param filename
      * @return -1 if the file doesn't exist or a version number if it does
      */
     public boolean hasFile(String filename) {
-        // TODO check against a version database
         return myDirectory.listFiles(new OpenFilter(filename)).length > 0;
     }
     
@@ -104,6 +212,10 @@ public class LocalFileServer extends FileServerPOA {
         return ip;
     }
 
+    /**
+     * Used for pinging, we can check the connection/load time of another server
+     * by doing a simple test response.
+     */
     @Override
     public boolean testResponse() {
         return true;
@@ -123,8 +235,7 @@ public class LocalFileServer extends FileServerPOA {
         for (String addr : server.getConnectedServers()) {
             if (addr.equals(this.getIpAddress())) {
                 addMe = false;
-            }
-            if (!connectedAddresses.contains(addr)) {
+            } else if (!connectedAddresses.contains(addr)) {
                 String host = addr.split(":")[0];
                 String port = addr.split(":")[1];
                 try {
@@ -139,21 +250,12 @@ public class LocalFileServer extends FileServerPOA {
             server.addServer(_this());
         }
     }
-    
-    @Override
-    public void closeFile() {
-        openedFile = null;
-        if (openedFileStream != null) {
-            try {
-                openedFileStream.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-    }
 
+    /**
+     * Get a list of all files across all connected servers
+     */
     @Override
-    public String[] getFiles() {
+    public String[] getAllFiles() {
         //file, ip
         HashMap<String, String> allFiles = new HashMap<String, String>();
         for (FileServer s : servers) {
@@ -179,68 +281,186 @@ public class LocalFileServer extends FileServerPOA {
     }
     
     /**
-     * Copies a file from a remote server to this local instance
+     * Copies a file from a remote server to this local instance.
+     * Always copies from whichever server has the newest version and is closest.
      * @param filename
      */
-    private void copyFile(String filename) {
+    private boolean copyFile(String filename) {
         File file = new File(filename);
         try {
             file.createNewFile();
-            for (FileServer other : this.servers) {
-                if (other.hasFile(filename)) {
-                    URL url = new URL(other.getIpAddress() + "/" + filename);
-                    URLConnection conn = url.openConnection();
-                    try (FileOutputStream output = new FileOutputStream(file);
-                         InputStream input = conn.getInputStream()) {
-                        byte[] buffer = new byte[64];
-                        while (input.read(buffer) != -1) {
-                            output.write(buffer);
-                        }
-                    }
+            FileServer newest = null;
+            int version = -1;
+            for (int i = 0; i < servers.size(); i++){
+            	FileServer remote = servers.get(i);
+            	if (remote.hasFile(filename)) {
+            		int v = remote.getVersion(filename);
+            		if (v > version) {
+            			version = v;
+            			newest = remote;
+            		}
+            	}
+            }
+            if (version == -1) {
+            	return false;
+            }
+            
+            URL url = new URL(newest.getIpAddress() + "/" + filename);
+            URLConnection conn = url.openConnection();
+            try (FileOutputStream output = new FileOutputStream(file);
+                 InputStream input = conn.getInputStream()) {
+                byte[] buffer = new byte[64];
+                while (input.read(buffer) != -1) {
+                    output.write(buffer);
                 }
             }
+            versionDB.updateFile(filename, version);
+            return true;
+            
         } catch (IOException e) {
             e.printStackTrace();
         }
+        return false;
     }
 
     /**
-     * Modifies the open file
+     * Get list of connected servers
      */
-    @Override
-    public void modifyFile() {
-        // TODO prevent writing if another server has a newer version number
-        
-        // TODO Increment this file's version number
-        
-    }
-
     @Override
     public String[] getConnectedServers() {
         String[] addr = new String[connectedAddresses.size()];
         return connectedAddresses.toArray(addr);
     }
-    
-    public static FileServer getRemoteServer(String host, String port) throws Exception {
-        Properties prop = new Properties();
-        prop.put("org.omg.CORBA.ORBInitialHost", host);
-        prop.put("org.omg.CORBA.ORBInitialPort", ""+(Integer.valueOf(port) + 1));
-        String[] args = {};
-        // create and initialize the ORB
-        ORB orb = ORB.init(args, prop);
 
-        // get reference to rootpoa & activate the POAManager
-        POA rootpoa = POAHelper.narrow(orb.resolve_initial_references("RootPOA"));
-        rootpoa.the_POAManager().activate();
+    /**
+     * Attempts to get a file if it exists on other servers.
+     * @return 
+     * 	true if file is loaded from self or copied over
+     * 	false if the file doesn't exist on self or other file servers
+     */
+	@Override
+	public boolean getFile(String filename) {
+		if (!hasFile(filename)) {
+			return copyFile(filename);
+		}
+		else {
+			return true;
+		}
+	}
+	
+	/**
+	 * Gets the size in bytes of a file
+	 */
+	@Override
+	public long getFileSize(String filename) {
+		return (new File(filename)).length();
+	}
+	
+	/**
+	 * Get a new session ID.
+	 * Clients should request this upon connection
+	 */
+	@Override
+	public int getSessionID() {
+		int id = SessionCounter;
+		SessionCounter++;
+		openFiles.put(id, null);
+		return id;
+	}
 
-        // get the root naming context
-        org.omg.CORBA.Object objRef = orb.resolve_initial_references("NameService");
-        // Use NamingContextExt which is part of the Interoperable
-        // Naming Service (INS) specification.
-        NamingContextExt ncRef = NamingContextExtHelper.narrow(objRef);
+	/**
+	 * Attempts to save the file on close.
+	 * If the version of the file opened by a session is out of date, then a warning
+	 * is thrown.
+	 */
+	@Override
+	public boolean closeFile(byte[] data, int sessionID) {
+		OpenFile file = openFiles.get(sessionID);
+		
+		if (!massCheckVersion(file.filename, file.version)) {
+			return false;
+		}
 
-        // resolve the Object Reference in Naming
-        String name = "NPFS";
-        return FileServerHelper.narrow(ncRef.resolve_str(name));
-    }
+		for (FileServer server : servers) {
+			server.purgeFile(file.filename);
+		}
+		
+		file.write(data);
+		versionDB.updateFile(file.filename, file.version);
+		
+		return true;
+	}
+
+	/**
+	 * Opens a file and sends the range of data down to a client to modify.
+	 * Server keeps track of that file being open for that client.
+	 */
+	@Override
+	public String openFile(String filename, long start, long end, int sessionID) {
+		int version = getVersion(filename);
+		OpenFile file = new OpenFile(filename, start, end, version);
+		openFiles.put(sessionID, file);
+		
+		File f = new File(filename);
+		// get byte buffer as string
+		try (FileInputStream in = new FileInputStream(f)) {
+			final int bufferSize = 64;
+			String output = "";
+			byte[] data = new byte[bufferSize];
+			long len = end - start;
+			
+			//skip ahead to where we want to read
+			in.skip(start);
+			for (long i = 0, result = 0; i < len && result != -1; i += bufferSize) {
+				result = in.read(data);
+				output += new String(data);
+			}
+			return output;
+		} catch (IOException e) {
+			e.printStackTrace();
+			System.exit(-1);
+		}
+		return null;
+	}
+
+	/**
+	 * Checks that the version number matches what's the current value in the server
+	 */
+	@Override
+	public boolean checkVersion(String filename, int version) {
+		return version == versionDB.getVersion(filename);
+	}
+	
+	/**
+	 * Checks the file version of a file across all servers
+	 * @param filename
+	 * @param version
+	 * @return
+	 */
+	private boolean massCheckVersion(String filename, int version) {
+		boolean valid = checkVersion(filename, version);
+		for (int i = 0; i < servers.size() && valid; i++) {
+			FileServer server = servers.get(i);
+			valid = valid && server.checkVersion(filename, version);
+		}
+		return valid;
+	}
+
+	/**
+	 * Get the current version number of a file
+	 */
+	@Override
+	public int getVersion(String filename) {
+		return versionDB.getVersion(filename);
+	}
+
+	/**
+	 * Removes a file from this system
+	 */
+	@Override
+	public void purgeFile(String filename) {
+		File file = new File(filename);
+		file.delete();
+		versionDB.updateFile(filename, -1);
+	}
 }

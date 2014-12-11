@@ -2,18 +2,24 @@ module NPFSApp
 {
   typedef sequence<string> files;
   typedef sequence<string> servers;
+  typedef sequence<octet> dataBuffer;
   
   interface FileServer
   {
-    boolean openFile(in string filename);
-    oneway void closeFile();
-    files getFiles();
+    boolean getFile(in string filename);
+    string openFile(in string filename, in long long start, in long long end, in long sessionID);
+    long long getFileSize(in string filename);
+    boolean closeFile(in dataBuffer data, in long sessionID);
+    files getAllFiles();
     files myFiles();
-    oneway void modifyFile();
     boolean hasFile(in string filename);
     string getIpAddress();
     boolean testResponse();
     servers getConnectedServers();
     oneway void addServer(in FileServer server);
+    long getSessionID();
+    boolean checkVersion(in string filename, in long version);
+    long getVersion(in string filename);
+    oneway void purgeFile(in string filename);
   };
 };
