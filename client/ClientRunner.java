@@ -1,7 +1,6 @@
-import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -57,7 +56,7 @@ public class ClientRunner {
 	                
 	                long start, end;
 	                do {
-	                	System.out.println("\nPlease enter a byte range between 0 and " + byteLength);
+	                	System.out.println("\nPlease enter a char range between 0 and " + byteLength);
 	                	System.out.print("start: ");
 	                	start = input.nextLong();
 	                	System.out.print("end: ");
@@ -65,7 +64,7 @@ public class ClientRunner {
 	                	
 	                } while (end <= start || start < 0 || start > byteLength || end < 0 || end > byteLength);
 	                
-	                String data = fsImpl.openFile(filename, start, end, sessionID);
+	                byte[] data = fsImpl.openFile(filename, start, end, sessionID);
 	                System.out.println(data);
 	                
 	                //work with a temp file version of the data
@@ -73,7 +72,7 @@ public class ClientRunner {
 	                try (OutputStream out = Files.newOutputStream(tmp, StandardOpenOption.CREATE)) {
 	                	System.out.println("making tmp: " + tmp.toString());
 	                	//string to bytes
-	                	out.write(data.getBytes());
+	                	out.write(data);
 	                }
 	                
 	                //write read in section to a hidden tmp file
@@ -81,17 +80,19 @@ public class ClientRunner {
 	                
 	                //proc.waitFor();
 	                
+	                String readIn = new String(data);
+	                System.out.println(readIn);
+	                
 	                //reread the file
-	                try(BufferedReader reader = Files.newBufferedReader(tmp, Charset.defaultCharset())) {
-		                int c;
-		                StringBuilder response= new StringBuilder();
-
-		                while ((c = reader.read()) != -1) {
-		                    response.append( (char)c ) ;  
-		                }
-		                String result = response.toString();
-		                
-		                fsImpl.closeFile(result.getBytes(), sessionID);
+	                try(InputStream tmpStream = Files.newInputStream(tmp, StandardOpenOption.READ)) {
+	                    File f = tmp.toFile();
+	                    int len = (int)f.length();
+	                    
+	                    byte[] out = new byte[len];
+	                    tmpStream.read(out);
+	                    
+	                    System.out.println("Saving file to server");
+	                    fsImpl.closeFile(out, sessionID);
 	                }
 	                
 	                Files.delete(tmp);

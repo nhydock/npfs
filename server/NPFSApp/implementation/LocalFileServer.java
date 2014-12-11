@@ -137,14 +137,14 @@ public class LocalFileServer extends FileServerPOA {
 				
 			} catch (IOException e) {
 				e.printStackTrace();
-			} finally {
-				try {
-					Files.copy(out, old, StandardCopyOption.REPLACE_EXISTING);
-					Files.delete(out);
-				} catch (IOException e) {
-					e.printStackTrace();
-				}
 			}
+			
+			try {
+                Files.copy(out, old, StandardCopyOption.REPLACE_EXISTING);
+                out.toFile().delete();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
 		}
 	}
 
@@ -286,9 +286,7 @@ public class LocalFileServer extends FileServerPOA {
      * @param filename
      */
     private boolean copyFile(String filename) {
-        File file = new File(filename);
         try {
-            file.createNewFile();
             FileServer newest = null;
             int version = -1;
             for (int i = 0; i < servers.size(); i++){
@@ -306,7 +304,10 @@ public class LocalFileServer extends FileServerPOA {
             	return false;
             }
             
-            
+            System.out.println("copying file " + filename + " at version " + version);
+            File file = new File(filename);
+            file.createNewFile();
+                
             int port = newest.openSocketFile(filename);
             //copy file over port
             
@@ -395,15 +396,27 @@ public class LocalFileServer extends FileServerPOA {
 		OpenFile file = openFiles.get(sessionID);
 		
 		if (!massCheckVersion(file.filename, file.version)) {
+		    System.out.println("file was out of date");
 			return false;
 		}
 
-		for (FileServer server : servers) {
-			server.purgeFile(file.filename);
-		}
-		
-		file.write(data);
-		versionDB.updateFile(file.filename, file.version + 1);
+		ArrayList<FileServer> had = new ArrayList<FileServer>();
+        for (FileServer server : servers) {
+            //if the server has a file, we should make it copy this one
+            if (server.hasFile(file.filename)) {
+                server.purgeFile(file.filename);
+                had.add(server);
+            }
+        }
+
+        System.out.println("Saving new version of " + file.filename + " to server.  Version: " + (file.version + 1));
+        file.write(data);
+        versionDB.updateFile(file.filename, file.version + 1);
+        
+        for (FileServer server : had) {
+            server.getFile(file.filename);
+        }
+        		
 		
 		return true;
 	}
@@ -413,7 +426,7 @@ public class LocalFileServer extends FileServerPOA {
 	 * Server keeps track of that file being open for that client.
 	 */
 	@Override
-	public String openFile(String filename, long start, long end, int sessionID) {
+	public byte[] openFile(String filename, long start, long end, int sessionID) {
 		int version = getVersion(filename);
 		OpenFile file = new OpenFile(filename, start, end, version);
 		openFiles.put(sessionID, file);
@@ -426,9 +439,7 @@ public class LocalFileServer extends FileServerPOA {
 			raf.seek(start);
 			byte[] data = new byte[(int)file.len];
 			raf.read(data);
-			
-			//skip ahead to where we want to read
-			return new String(data, Charset.defaultCharset());
+			return data;
 		} catch (IOException e) {
 			e.printStackTrace();
 			System.exit(-1);
@@ -441,7 +452,7 @@ public class LocalFileServer extends FileServerPOA {
 	 */
 	@Override
 	public boolean checkVersion(String filename, int version) {
-		return version == versionDB.getVersion(filename);
+	    return version == versionDB.getVersion(filename);
 	}
 	
 	/**
@@ -454,7 +465,9 @@ public class LocalFileServer extends FileServerPOA {
 		boolean valid = checkVersion(filename, version);
 		for (int i = 0; i < servers.size() && valid; i++) {
 			FileServer server = servers.get(i);
-			valid = valid && server.checkVersion(filename, version);
+			if (server.hasFile(filename)) {
+			    valid = valid && server.checkVersion(filename, version);
+			}
 		}
 		return valid;
 	}
@@ -472,6 +485,7 @@ public class LocalFileServer extends FileServerPOA {
 	 */
 	@Override
 	public void purgeFile(String filename) {
+	    System.out.println("Attempting to delete old version of " + filename);
 		File file = new File(filename);
 		file.delete();
 		versionDB.updateFile(filename, -1);
