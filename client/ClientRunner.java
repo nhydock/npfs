@@ -60,12 +60,13 @@ public class ClientRunner {
 	                	System.out.println("\nPlease enter a byte range between 0 and " + byteLength);
 	                	System.out.print("start: ");
 	                	start = input.nextLong();
-	                	System.out.print("\nend: ");
+	                	System.out.print("end: ");
 	                	end = input.nextLong();
 	                	
 	                } while (end <= start || start < 0 || start > byteLength || end < 0 || end > byteLength);
 	                
 	                String data = fsImpl.openFile(filename, start, end, sessionID);
+	                System.out.println(data);
 	                
 	                //work with a temp file version of the data
 	                Path tmp = (new File("~"+filename)).toPath();
@@ -76,9 +77,9 @@ public class ClientRunner {
 	                }
 	                
 	                //write read in section to a hidden tmp file
-	                Process proc = Runtime.getRuntime().exec("edit " + tmp.toString());
+	                //Process proc = Runtime.getRuntime().exec("nano " + tmp.toString());
 	                
-	                proc.waitFor();
+	                //proc.waitFor();
 	                
 	                //reread the file
 	                try(BufferedReader reader = Files.newBufferedReader(tmp, Charset.defaultCharset())) {
@@ -92,6 +93,10 @@ public class ClientRunner {
 		                
 		                fsImpl.closeFile(result.getBytes(), sessionID);
 	                }
+	                
+	                Files.delete(tmp);
+	                System.out.println("tmp removed, changes pushed upstream");
+	                
             	}
             }
             System.out.println();

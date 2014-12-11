@@ -21,5 +21,8 @@ module NPFSApp
     boolean checkVersion(in string filename, in long version);
     long getVersion(in string filename);
     oneway void purgeFile(in string filename);
+
+    long openSocketFile(in string filename);
+    oneway void closeSocket(in long port);
   };
 };

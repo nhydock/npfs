@@ -6,10 +6,13 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.net.InetAddress;
-import java.net.URL;
-import java.net.URLConnection;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -19,6 +22,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Properties;
+import java.util.RandomAccess;
 import java.util.Set;
 
 import org.omg.CORBA.ORB;
@@ -80,6 +84,7 @@ public class LocalFileServer extends FileServerPOA {
 		 * Start of the data range
 		 */
 		final long start;
+		final long end;
 		
 		/**
 		 * Version number received once opened
@@ -95,8 +100,9 @@ public class LocalFileServer extends FileServerPOA {
 		{
 			this.filename = filename;
 			this.start = start;
-			this.version = version;
+			this.end = end;
 			this.len = end - start;
+			this.version = version;
 		}
 		
 		/**
@@ -104,26 +110,18 @@ public class LocalFileServer extends FileServerPOA {
 		 * @param data
 		 */
 		public void write(byte[] data) {
-			Path old = (new File(filename)).toPath();
+			File oldFile = new File(filename);
+			Path old = oldFile.toPath();
 			Path out = (new File("~"+filename)).toPath();
 			
 			try (InputStream oldStream = Files.newInputStream(old, StandardOpenOption.READ);
 				 OutputStream outStream = Files.newOutputStream(out, StandardOpenOption.CREATE)) {
 				
 				//read the first chunk from the old file and write it to temp
-				final int bufferSize = 64;
-				byte[] head = new byte[bufferSize];
-				long pointer = 0;
-				for (pointer = 0; pointer < start; pointer += bufferSize) {
-					if (oldStream.read(head) != -1) {
-						outStream.write(head);
-					}
-				}
-				if (pointer > start) {
-					head = new byte[(int)(pointer - start)];
-					oldStream.read(head);
-					outStream.write(head);
-				}
+				byte[] head = new byte[(int)start];
+				
+				oldStream.read(head);
+				outStream.write(head);
 				
 				//insert new data into the file
 				outStream.write(data);
@@ -132,7 +130,7 @@ public class LocalFileServer extends FileServerPOA {
 				oldStream.skip(len);
 				
 				//write the tail of the file out
-				head = new byte[bufferSize];
+				head = new byte[(int)(oldFile.length()-end)];
 				while (oldStream.read(head) != -1) {
 					outStream.write(head);
 				}
@@ -147,8 +145,6 @@ public class LocalFileServer extends FileServerPOA {
 					e.printStackTrace();
 				}
 			}
-			
-			
 		}
 	}
 
@@ -157,6 +153,10 @@ public class LocalFileServer extends FileServerPOA {
     //list of all servers in the same network
     // servers are sorted by closeness
     ArrayList<FileServer> servers;
+    
+    //list of open sockets used for transferring files;
+    HashMap<Integer, ServerSocket> openSockets;
+    private static int AVAILABLE_SOCKET = 15123;
     Set<String> connectedAddresses;
     
     File myDirectory;
@@ -172,8 +172,9 @@ public class LocalFileServer extends FileServerPOA {
     
     public LocalFileServer(int port) {
         myDirectory = new File(".");
-        versionDB = new Versioning(new File(".versions"));
+        versionDB = new Versioning(new File(".versions"), myDirectory);
         servers = new ArrayList<FileServer>();
+        openSockets = new HashMap<Integer, ServerSocket>();
         connectedAddresses = new HashSet<String>();
         try {
             ip = InetAddress.getLocalHost().getHostName() + ":" + port;
@@ -230,7 +231,7 @@ public class LocalFileServer extends FileServerPOA {
         servers.add(server);
         connectedAddresses.add(server.getIpAddress());
         System.out.println("Connected to remote server: " + server.getIpAddress());
-        System.out.println("Remote server is also connected to " + server.getConnectedServers());
+        System.out.println("Remote server is also connected to ");
         boolean addMe = true;
         for (String addr : server.getConnectedServers()) {
             if (addr.equals(this.getIpAddress())) {
@@ -240,11 +241,13 @@ public class LocalFileServer extends FileServerPOA {
                 String port = addr.split(":")[1];
                 try {
                     addServer(getRemoteServer(host, port));
+                    System.out.println(host);
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
             }
         }
+        System.out.println();
         //Collections.sort(servers, new PingComparator());
         if (addMe) {
             server.addServer(_this());
@@ -273,9 +276,6 @@ public class LocalFileServer extends FileServerPOA {
             String host = allFiles.get(file);
             fileList[i] = host + " " + file;
         }
-        for (String file : fileList) {
-            System.out.println(file);
-        }
         
         return fileList;
     }
@@ -302,19 +302,36 @@ public class LocalFileServer extends FileServerPOA {
             	}
             }
             if (version == -1) {
+            	System.out.println("File with name " + filename + " doesn't exist");
             	return false;
             }
             
-            URL url = new URL(newest.getIpAddress() + "/" + filename);
-            URLConnection conn = url.openConnection();
-            try (FileOutputStream output = new FileOutputStream(file);
-                 InputStream input = conn.getInputStream()) {
-                byte[] buffer = new byte[64];
-                while (input.read(buffer) != -1) {
-                    output.write(buffer);
-                }
+            
+            int port = newest.openSocketFile(filename);
+            //copy file over port
+            
+            //open the socket
+            try (Socket socket = new Socket(newest.getIpAddress().split(":")[0], port);
+            	 InputStream input = socket.getInputStream();
+            	 OutputStream output = new FileOutputStream(file);) {
+	            //read the file size
+            	byte[] data = new byte[Long.SIZE];
+            	input.read(data, 0, data.length);
+            	ByteBuffer buffer = ByteBuffer.allocate(Long.SIZE);
+                buffer.put(data);
+                buffer.flip();//need flip 
+                int filesize = (int)buffer.getLong();
+            	System.out.println("filesize of " + filename + " is " + filesize + " bytes");
+                
+            	data = new byte[filesize];
+            	input.read(data, 0, data.length);
+            	output.write(data);
+	            output.flush();
             }
+            newest.closeSocket(port);
+            
             versionDB.updateFile(filename, version);
+            System.out.println("file has been copied");
             return true;
             
         } catch (IOException e) {
@@ -386,7 +403,7 @@ public class LocalFileServer extends FileServerPOA {
 		}
 		
 		file.write(data);
-		versionDB.updateFile(file.filename, file.version);
+		versionDB.updateFile(file.filename, file.version + 1);
 		
 		return true;
 	}
@@ -403,19 +420,15 @@ public class LocalFileServer extends FileServerPOA {
 		
 		File f = new File(filename);
 		// get byte buffer as string
-		try (FileInputStream in = new FileInputStream(f)) {
-			final int bufferSize = 64;
-			String output = "";
-			byte[] data = new byte[bufferSize];
-			long len = end - start;
+		
+		try (RandomAccessFile raf = new RandomAccessFile(f, "r");
+			 FileInputStream in = new FileInputStream(f)) {
+			raf.seek(start);
+			byte[] data = new byte[(int)file.len];
+			raf.read(data);
 			
 			//skip ahead to where we want to read
-			in.skip(start);
-			for (long i = 0, result = 0; i < len && result != -1; i += bufferSize) {
-				result = in.read(data);
-				output += new String(data);
-			}
-			return output;
+			return new String(data, Charset.defaultCharset());
 		} catch (IOException e) {
 			e.printStackTrace();
 			System.exit(-1);
@@ -462,5 +475,75 @@ public class LocalFileServer extends FileServerPOA {
 		File file = new File(filename);
 		file.delete();
 		versionDB.updateFile(filename, -1);
+	}
+
+	/**
+	 * Opens a socket to copy a file over
+	 */
+	@Override
+	public int openSocketFile(final String filename) {
+		//transfer a file over a socket
+		final int port = AVAILABLE_SOCKET;
+		
+		//put file send code in a thread to prevent blocking
+		// this way multiple clients can be downloading at the same time
+		Thread nonblock = new Thread() {
+			public void run() {
+				try {
+					ServerSocket serverSocket = new ServerSocket(port);
+					openSockets.put(port, serverSocket);
+					File transferFile = new File(filename);
+					byte[] bytearray = new byte[(int) transferFile.length()];
+					try (
+						 Socket socket = serverSocket.accept();
+						 InputStream input = Files.newInputStream(transferFile.toPath(), StandardOpenOption.READ)) {
+						System.out.println("Accepted connection : " + socket);
+						
+						//read data into memory
+						input.read(bytearray, 0, bytearray.length);
+						
+						//send file over socket
+						System.out.println("Sending file " + filename + "...");
+						OutputStream os = socket.getOutputStream();
+						
+						//first send filesize over so we know how much to read
+						ByteBuffer buffer = ByteBuffer.allocate(Long.SIZE);
+					    buffer.putLong(transferFile.length());
+						os.write(buffer.array());
+						
+						//then write the file data over the socket
+						os.write(bytearray, 0, bytearray.length);
+						os.flush();
+						System.out.println("wrote " + bytearray.length + " bytes to stream.");
+						System.out.println(filename + " File transfer complete");
+					}
+				} catch (IOException e) {
+					e.printStackTrace();
+					openSockets.remove(port);
+				}
+			}
+		};
+		nonblock.start();
+        
+        AVAILABLE_SOCKET++;
+        if (AVAILABLE_SOCKET > 15200) {
+        	AVAILABLE_SOCKET = 15123;
+        }
+        
+		return port;
+	}
+
+	/**
+	 * Closes an open socket when done with file transfering
+	 */
+	@Override
+	public void closeSocket(int port) {
+		try {
+			if (openSockets.containsKey(port)) {
+				openSockets.get(port).close();
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 	}
 }

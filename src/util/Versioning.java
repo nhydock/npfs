@@ -1,10 +1,13 @@
 package util;
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.Scanner;
 
@@ -20,29 +23,42 @@ public class Versioning {
     
     File versionFile;
     
-    public Versioning(File versionFile) {
+    public Versioning(File versionFile, File directory) {
         this.versionFile = versionFile;
+        this.versions = new HashMap<String, Integer>();
         if (!this.versionFile.exists()) {
             try {
                 this.versionFile.createNewFile();
             } catch (IOException e) {
                 e.printStackTrace();
             }
+        } else {
+	        // read the file
+	        try (BufferedReader reader = Files.newBufferedReader(versionFile.toPath(), Charset.defaultCharset())) {
+	        	String line;
+	            while ((line = reader.readLine()) != null) {
+	            	//System.out.println(line);
+	                String[] params = line.split("\\|");
+	                String filename = params[0];
+	                String ver = params[1];
+	                //System.out.println(filename + " " + ver);
+	                int version = Integer.parseInt(ver);
+	                
+	                versions.put(filename, version);
+	            }
+	        } catch (IOException e1) {
+				// TODO Auto-generated catch block
+				e1.printStackTrace();
+			}
         }
         
-        this.versions = new HashMap<String, Integer>();
-        // read the file
-        try (Scanner reader = new Scanner(new FileInputStream(versionFile))) {
-            while (reader.hasNextLine()) {
-                String[] params = reader.nextLine().split("|");
-                String filename = params[0];
-                int version = Integer.parseInt(params[1]);
-                
-                versions.put(filename, version);
-            }
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
+        for (File f : directory.listFiles(HideHidden.instance)) {
+        	if (!versions.containsKey(f.getName())) {
+        		versions.put(f.getName(), 1);
+        	}
         }
+        
+        update();
     }
     
     public int getVersion(String filename) {
@@ -72,7 +88,7 @@ public class Versioning {
             String output = "";
             for (String key : this.versions.keySet()) {
                 Integer val = this.versions.get(key);
-                output += String.format("%s %d\n", key, val);
+                output += String.format("%s|%d\n", key, val);
             }
             writer.write(output);
         } catch (IOException e) {
