@@ -9,11 +9,12 @@ import NPFSApp.implementation.LocalFileServer;
 
 /**
  * Server launcher
+ * 
  * @author nhydock
  *
  */
 public class Runner {
-    
+
     /**
      * 
      * @param args
@@ -31,7 +32,7 @@ public class Runner {
             int port = 1050;
             for (int i = 0; i < args.length; i++) {
                 if (args[i].equals("-port")) {
-                    port = Integer.parseInt(args[i+1]);
+                    port = Integer.parseInt(args[i + 1]);
                 }
             }
             final LocalFileServer server = new LocalFileServer(port);
@@ -45,30 +46,30 @@ public class Runner {
             // Use NamingContextExt which is part of the Interoperable
             // Naming Service (INS) specification.
             NamingContextExt ncRef = NamingContextExtHelper.narrow(objRef);
-            
+
             // bind the Object Reference in Naming
             String name = "NPFS";
             NameComponent path[] = ncRef.to_name(name);
             ncRef.rebind(path, href);
 
             // build references
-            
+
             for (int i = 0; i < args.length; i++) {
                 String arg = args[i];
                 if (arg.equals("-remote")) {
-                    String hosts = args[i+1];
+                    String hosts = args[i + 1];
                     for (String addr : hosts.split(",")) {
                         String rhost = addr.split(":")[0];
                         String rport = addr.split(":")[1];
                         System.out.println("connecting to " + rhost + ":" + rport);
-                        
+
                         server.addServer(LocalFileServer.getRemoteServer(rhost, rport));
                     }
                 }
             }
-            
+
             System.out.println("NPFileServer ready and waiting ...");
-            
+
             // wait for invocations from clients
             orb.run();
         }
