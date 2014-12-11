@@ -13,9 +13,21 @@ import org.omg.CosNaming.NamingContextExtHelper;
 import NPFSApp.FileServer;
 import NPFSApp.FileServerHelper;
 
+/**
+ * Client Runner
+ * @author nhydock
+ *
+ */
 public class ClientRunner {
+    /**
+     * Reference to the file server
+     */
     static FileServer fsImpl;
 
+    /**
+     * 
+     * @param args
+     */
     public static void main(String args[]) {
         try {
             // create and initialize the ORB

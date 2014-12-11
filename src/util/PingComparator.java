@@ -4,11 +4,17 @@ import java.util.Comparator;
 
 import NPFSApp.FileServer;
 
+/**
+ * Compator used for sorting file servers by their ping/load times
+ * @author nhydock
+ *
+ */
 public class PingComparator implements Comparator<FileServer>
 {
     /**
      * Pings this file server instance from the current host
-     * @return
+     * @param server - file server to compare against
+     * @return time it took to call the server
      */
     public long ping(FileServer server) {
         long elapsed;

@@ -2,15 +2,11 @@ package util;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.util.HashMap;
-import java.util.Scanner;
-
 
 /**
  * Hashmap file keeping track of version numbers
@@ -19,10 +15,21 @@ import java.util.Scanner;
  *
  */
 public class Versioning {
+    /**
+     * Our version map
+     */
     HashMap<String, Integer> versions;
     
+    /**
+     * Database file
+     */
     File versionFile;
     
+    /**
+     * Create a new versioning database instance
+     * @param versionFile - name of the file holding our version info
+     * @param directory - directory to keep file versions of
+     */
     public Versioning(File versionFile, File directory) {
         this.versionFile = versionFile;
         this.versions = new HashMap<String, Integer>();
@@ -61,6 +68,11 @@ public class Versioning {
         update();
     }
     
+    /**
+     * Fetches the version number of a file
+     * @param filename - file to look for
+     * @return the version number
+     */
     public int getVersion(String filename) {
         return versions.get(filename);
     }
@@ -69,7 +81,6 @@ public class Versioning {
      * Updates a file to a new version number
      * @param filename
      * @param version - current version number
-     * @return
      */
     public void updateFile(String filename, int version) {
     	if (version == -1) {

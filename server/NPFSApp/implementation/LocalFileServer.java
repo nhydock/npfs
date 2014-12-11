@@ -12,7 +12,6 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
-import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -22,7 +21,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Properties;
-import java.util.RandomAccess;
 import java.util.Set;
 
 import org.omg.CORBA.ORB;
@@ -38,13 +36,18 @@ import NPFSApp.FileServer;
 import NPFSApp.FileServerHelper;
 import NPFSApp.FileServerPOA;
 
+/**
+ * Local file server class that runs on our system
+ * @author nhydock
+ *
+ */
 public class LocalFileServer extends FileServerPOA {
 
     /**
      * Creates a link to a remote server, necessary for copying files to local instances
      * @param host
      * @param port
-     * @return
+     * @return link to a file server
      * @throws Exception
      */
     public static FileServer getRemoteServer(String host, String port) throws Exception {
@@ -84,6 +87,9 @@ public class LocalFileServer extends FileServerPOA {
 		 * Start of the data range
 		 */
 		final long start;
+		/**
+		 * End of our data buffer range
+		 */
 		final long end;
 		
 		/**
@@ -96,6 +102,13 @@ public class LocalFileServer extends FileServerPOA {
 		 */
 		public long len;
 		
+		/**
+		 * Create an open file record
+		 * @param filename - file we're opening
+		 * @param start - start of our data range
+		 * @param end - end of our data range
+		 * @param version - version number of the file when we opened it
+		 */
 		OpenFile(String filename, long start, long end, int version) 
 		{
 			this.filename = filename;
@@ -148,20 +161,42 @@ public class LocalFileServer extends FileServerPOA {
 		}
 	}
 
+	/**
+	 * Our id distributor for the session connections
+	 */
 	private static int SessionCounter = 0;
 	
-    //list of all servers in the same network
-    // servers are sorted by closeness
+    /**
+     * list of all servers in the same network
+     * servers are sorted by closeness
+     */
     ArrayList<FileServer> servers;
     
-    //list of open sockets used for transferring files;
+    /**
+     * list of open sockets used for transferring files;
+     */
     HashMap<Integer, ServerSocket> openSockets;
+    /**
+     * next open socket used for listing for when servers want to transfer files to each other
+     */
     private static int AVAILABLE_SOCKET = 15123;
+    /**
+     * Set of connected ips for servers
+     */
     Set<String> connectedAddresses;
     
+    /**
+     * The directory the server is distributing files out of
+     */
     File myDirectory;
+    /**
+     * Our file version database
+     */
     Versioning versionDB;
     
+    /**
+     * IP of this server
+     */
     String ip;
     
     /**
@@ -170,6 +205,10 @@ public class LocalFileServer extends FileServerPOA {
      */
     HashMap<Integer, OpenFile> openFiles;
     
+    /**
+     * Creates a new LocalFileServer instance on a port
+     * @param port
+     */
     public LocalFileServer(int port) {
         myDirectory = new File(".");
         versionDB = new Versioning(new File(".versions"), myDirectory);
@@ -223,8 +262,9 @@ public class LocalFileServer extends FileServerPOA {
     }
 
     /**
-     * Adds this ip to the list of other seen nodes
-     * @param ip
+     * Adds this file server to the list of other seen nodes.  Nodes
+     * recursively connect to each other when added.
+     * @param server - file server to monitor
      */
     @Override
     public void addServer(FileServer server) {
@@ -284,6 +324,7 @@ public class LocalFileServer extends FileServerPOA {
      * Copies a file from a remote server to this local instance.
      * Always copies from whichever server has the newest version and is closest.
      * @param filename
+     * @return true if the file was found and copied.  false if the file doesn't exist anywhere
      */
     private boolean copyFile(String filename) {
         try {
@@ -459,7 +500,7 @@ public class LocalFileServer extends FileServerPOA {
 	 * Checks the file version of a file across all servers
 	 * @param filename
 	 * @param version
-	 * @return
+	 * @return true if the file version matches what all servers have
 	 */
 	private boolean massCheckVersion(String filename, int version) {
 		boolean valid = checkVersion(filename, version);

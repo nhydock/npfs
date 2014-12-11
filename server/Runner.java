@@ -7,8 +7,17 @@ import org.omg.PortableServer.POAHelper;
 
 import NPFSApp.implementation.LocalFileServer;
 
+/**
+ * Server launcher
+ * @author nhydock
+ *
+ */
 public class Runner {
     
+    /**
+     * 
+     * @param args
+     */
     public static void main(String... args) {
         try {
             // create and initialize the ORB
